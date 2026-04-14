@@ -82,8 +82,10 @@ RSI_MIN = 35
 RSI_MAX = 75
 
 # ── Earnings Blackout ─────────────────────────────────────────────────────────
-EARNINGS_BLACKOUT_DAYS = 10     # no open new position if earnings within this many days of expiry
+EARNINGS_BLACKOUT_DAYS = 10     # enter conservative mode if earnings within this many days of expiry
 POST_EARNINGS_WAIT     = 2      # wait 2 trading days after earnings before re-entry
+EARNINGS_CONSERVATIVE_DELTA_SHIFT = 0.05
+EARNINGS_CONSERVATIVE_PROFIT_TAKE = 0.30
 
 # ── Profit Take Thresholds ────────────────────────────────────────────────────
 # (profit_pct, close_if_dte_gt)

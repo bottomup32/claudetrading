@@ -11,6 +11,7 @@ from bot.config import (
     TICKERS, CSP_MAX_DTE, CC_MAX_DTE,
     IV_RANK_MIN_ENTRY, IV_RANK_LOW_ZONE,
     RSI_MIN, RSI_MAX, EARNINGS_BLACKOUT_DAYS, POST_EARNINGS_WAIT,
+    EARNINGS_CONSERVATIVE_PROFIT_TAKE,
     PROFIT_TAKE_40PCT_DTE, PROFIT_TAKE_50PCT, PROFIT_TAKE_GAMMA, GAMMA_DTE_THRESHOLD,
     RESCUE_TRIGGER_PCT, CIRCUIT_BREAKER,
     ROLL_TRIGGER_DROP_PCT, ROLL_TRIGGER_SURGE_PCT, MAX_ROLLS,
@@ -333,7 +334,7 @@ class WheelStrategy:
                     continue  # CSP already open on this ticker
 
             td = ctx["tickers"][ticker]
-            reason = self._csp_entry_check(ticker, td, vix_zone, vix_params, account, earnings)
+            reason, is_conservative = self._csp_entry_check(ticker, td, vix_zone, vix_params, account, earnings)
             if reason:
                 logger.info(f"{ticker} CSP BLOCKED: {reason}")
                 log_decision_skip(
@@ -343,7 +344,7 @@ class WheelStrategy:
                 )
                 continue
 
-            eligible.append((ticker, td["iv_rank"], td["rsi"]))
+            eligible.append((ticker, td["iv_rank"], td["rsi"], is_conservative))
 
         if not eligible:
             logger.info("No eligible tickers for new CSP")
@@ -352,11 +353,12 @@ class WheelStrategy:
         # Ticker priority: higher IV Rank → better RSI position → PLTR tiebreaker
         eligible.sort(key=lambda x: (-x[1], abs(x[2] - 55), 0 if x[0] == "PLTR" else 1))
         chosen_ticker = eligible[0][0]
-        logger.info(f"Chosen ticker for new CSP: {chosen_ticker}")
+        chosen_conservative = eligible[0][3]
+        logger.info(f"Chosen ticker for new CSP: {chosen_ticker} (conservative={chosen_conservative})")
 
-        self._open_csp(chosen_ticker, vix_zone, vix_params)
+        self._open_csp(chosen_ticker, vix_zone, vix_params, earnings_conservative=chosen_conservative)
 
-    def _open_csp(self, ticker: str, vix_zone: str, vix_params: dict):
+    def _open_csp(self, ticker: str, vix_zone: str, vix_params: dict, earnings_conservative: bool = False):
         """Find and sell the best CSP for the given ticker."""
         td = self._market_context["tickers"][ticker]
         max_dte = min(CSP_MAX_DTE[ticker], vix_params["max_dte"])
@@ -367,7 +369,7 @@ class WheelStrategy:
             dte_min=3,
             dte_max=max_dte,
         )
-        best = find_best_put(contracts, ticker, td["iv_rank"], vix_zone, max_dte)
+        best = find_best_put(contracts, ticker, td["iv_rank"], vix_zone, max_dte, earnings_conservative=earnings_conservative)
         if not best:
             logger.warning(f"{ticker} CSP: no contract found")
             return
@@ -460,6 +462,14 @@ class WheelStrategy:
                 logger.info("TSLA rescue: pausing CC — drop > 20% + VIX > 30")
                 return
 
+        earn_str = ctx["earnings"].get(ticker)
+        earnings_conservative = False
+        if earn_str:
+            earn_date = date.fromisoformat(earn_str[:10])
+            max_exp = date.today() + timedelta(days=max_dte)
+            if (earn_date - max_exp).days <= EARNINGS_BLACKOUT_DAYS:
+                earnings_conservative = True
+
         contracts = self.client.get_option_chain(
             underlying=ticker,
             option_type="call",
@@ -475,6 +485,7 @@ class WheelStrategy:
             adjusted_cost_basis=adj_cost_basis,
             max_dte=max_dte,
             rescue_mode=rescue_mode,
+            earnings_conservative=earnings_conservative,
         )
         if not best:
             logger.warning(f"{ticker} CC: no contract found")
@@ -649,6 +660,14 @@ class WheelStrategy:
         dte_min = max(5, (date.fromisoformat(pos["expiration"]) - date.today()).days + 5)
         dte_max = dte_min + 7
 
+        earn_str = self.state["earnings"].get(ticker)
+        earnings_conservative = False
+        if earn_str:
+            earn_date = date.fromisoformat(earn_str[:10])
+            max_exp = date.today() + timedelta(days=dte_max)
+            if (earn_date - max_exp).days <= EARNINGS_BLACKOUT_DAYS:
+                earnings_conservative = True
+
         contracts = self.client.get_option_chain(
             underlying=ticker, option_type=opt_type,
             dte_min=dte_min, dte_max=min(dte_max, max_dte),
@@ -656,12 +675,13 @@ class WheelStrategy:
 
         td = ctx["tickers"][ticker]
         if stage == "CSP":
-            new_contract = find_best_put(contracts, ticker, td["iv_rank"], vix_zone, dte_max)
+            new_contract = find_best_put(contracts, ticker, td["iv_rank"], vix_zone, dte_max, earnings_conservative=earnings_conservative)
         else:
             new_contract = find_best_call(
                 contracts=contracts, ticker=ticker, iv_rank=td["iv_rank"],
-                vix_zone=vix_zone, cost_basis=pos["assignment_price"],
-                adjusted_cost_basis=pos["adjusted_cost_basis"], max_dte=dte_max,
+                vix_zone=vix_zone, cost_basis=pos.get("assignment_price", 0),
+                adjusted_cost_basis=pos.get("adjusted_cost_basis", 0), max_dte=dte_max,
+                earnings_conservative=earnings_conservative,
             )
 
         if not new_contract:
@@ -671,17 +691,6 @@ class WheelStrategy:
         if not evaluate_roll_candidate(current_snapshot, new_contract, stage):
             logger.info(f"{ticker} roll rejected: net debit — never roll for debit")
             return
-
-        # Check earnings blackout for new expiry
-        # Block if earnings fall within BLACKOUT_DAYS after the new expiration
-        earn_str = self.state["earnings"].get(ticker)
-        if earn_str:
-            earn_date = date.fromisoformat(earn_str[:10])
-            new_exp   = date.fromisoformat(new_contract["expiration"])
-            days_gap  = (earn_date - new_exp).days  # positive = earnings after expiry
-            if 0 <= days_gap <= EARNINGS_BLACKOUT_DAYS:
-                logger.info(f"{ticker} roll blocked: earnings {earn_str} within {days_gap}d of new expiry")
-                return
 
         # Execute: close old, open new
         close_result = buy_to_close(self.client, current_snapshot, ticker)
@@ -751,7 +760,7 @@ class WheelStrategy:
                 entry_prem = pos["premium_received"]
                 profit_pct = check_profit_pct(entry_prem, snapshot["mid"])
 
-                if profit_pct >= 0.30:
+                if profit_pct >= EARNINGS_CONSERVATIVE_PROFIT_TAKE:
                     logger.info(f"{ticker} earnings proximity — closing at {profit_pct:.0%} profit")
                     self._close_position(ticker, pos, snapshot, "earnings_blackout", profit_pct)
                 else:
@@ -808,15 +817,17 @@ class WheelStrategy:
 
     def _csp_entry_check(
         self, ticker: str, td: dict, vix_zone: str, vix_params: dict, account: dict, earnings: dict
-    ) -> Optional[str]:
+    ) -> tuple[Optional[str], bool]:
         """
-        Return a reason string if CSP entry is blocked, else None.
-        Implements all 7 entry conditions.
+        Return (block_reason, earnings_conservative_flag).
+        If block_reason is not None, CSP is blocked.
         """
+        earnings_conservative = False
+
         # 1. Capital
         required = td["price"] * 100 * 0.80  # rough estimate
         if account["cash"] < required:
-            return f"insufficient_cash (need ~${required:,.0f})"
+            return f"insufficient_cash (need ~${required:,.0f})", False
 
         # 2. Earnings blackout
         earn_str = earnings.get(ticker)
@@ -824,33 +835,38 @@ class WheelStrategy:
             earn_date = date.fromisoformat(earn_str[:10])
             # Use max DTE for blackout check
             max_exp = date.today() + timedelta(days=CSP_MAX_DTE[ticker])
+            days_to_earn = (earn_date - date.today()).days
             if (earn_date - max_exp).days <= EARNINGS_BLACKOUT_DAYS:
-                return f"earnings_blackout ({earn_str})"
+                if -POST_EARNINGS_WAIT <= days_to_earn <= 0:
+                    return f"post_earnings_wait ({earn_str})", False
+                else:
+                    logger.info(f"{ticker} within {EARNINGS_BLACKOUT_DAYS}d of earnings max_exp: engaging conservative mode")
+                    earnings_conservative = True
 
         # 3. VIX zone position limit already enforced before calling this
 
         # 4. IV Rank
         iv_rank = td["iv_rank"]
         if iv_rank < IV_RANK_LOW_ZONE:
-            return f"iv_rank_too_low ({iv_rank:.1%})"
+            return f"iv_rank_too_low ({iv_rank:.1%})", False
         if iv_rank < IV_RANK_MIN_ENTRY and vix_zone != "low":
-            return f"iv_rank_below_threshold ({iv_rank:.1%}) in {vix_zone} VIX zone"
+            return f"iv_rank_below_threshold ({iv_rank:.1%}) in {vix_zone} VIX zone", False
 
         # 5. Concentration — only 1 CSP at a time (enforced in caller)
 
         # 6. RSI
         rsi = td["rsi"]
         if not (RSI_MIN <= rsi <= RSI_MAX):
-            return f"rsi_out_of_range ({rsi:.1f})"
+            return f"rsi_out_of_range ({rsi:.1f})", False
 
         # 7. Cooldown
         last_exit = self.state["last_exit_date"].get(ticker)
         if last_exit:
             days_since_exit = (date.today() - date.fromisoformat(last_exit)).days
             if days_since_exit < CSP_REENTRY_COOLDOWN_SESSIONS:
-                return f"cooldown ({days_since_exit} days since exit)"
+                return f"cooldown ({days_since_exit} days since exit)", False
 
-        return None  # all clear
+        return None, earnings_conservative
 
     def _get_deployed_capital(self) -> float:
         """Estimate capital currently deployed in open positions."""

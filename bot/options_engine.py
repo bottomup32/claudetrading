@@ -14,22 +14,25 @@ from bot.config import (
 logger = logging.getLogger(__name__)
 
 
-def compute_delta_target(ticker: str, iv_rank: float, vix_zone: str, stage: str) -> tuple[float, float]:
+def compute_delta_target(ticker: str, iv_rank: float, vix_zone: str, stage: str, earnings_conservative: bool = False) -> tuple[float, float]:
     """
-    Returns (delta_min, delta_max) absolute values after applying VIX shift.
+    Returns (delta_min, delta_max) absolute values after applying VIX and earnings shifts.
     stage = "CSP" or "CC"
     """
-    from bot.config import VIX_ZONE_PARAMS
+    from bot.config import VIX_ZONE_PARAMS, EARNINGS_CONSERVATIVE_DELTA_SHIFT
     bucket = iv_rank_bucket(iv_rank)
     delta_table = CSP_DELTA if stage == "CSP" else CC_DELTA
     base_min, base_max = delta_table[ticker][bucket]
 
     _, _, _, vix_shift = VIX_ZONE_PARAMS[vix_zone]
+    shift = vix_shift
+    if earnings_conservative:
+        shift += EARNINGS_CONSERVATIVE_DELTA_SHIFT
 
     # For CSP: shift further OTM = reduce delta magnitude
     # For CC:  shift further OTM = reduce delta magnitude
-    adj_min = max(0.05, base_min - vix_shift)
-    adj_max = max(0.05, base_max - vix_shift)
+    adj_min = max(0.05, base_min - shift)
+    adj_max = max(0.05, base_max - shift)
     return (adj_min, adj_max)
 
 
@@ -63,6 +66,7 @@ def find_best_put(
     iv_rank: float,
     vix_zone: str,
     max_dte: int,
+    earnings_conservative: bool = False,
 ) -> Optional[dict]:
     """
     From a list of put contract snapshots, return the best one matching:
@@ -72,8 +76,8 @@ def find_best_put(
     - DTE ≤ max_dte
     Picks the contract closest to the center of the delta range.
     """
-    delta_min, delta_max = compute_delta_target(ticker, iv_rank, vix_zone, "CSP")
-    logger.info(f"{ticker} CSP delta target: [{delta_min:.2f}, {delta_max:.2f}] | VIX zone: {vix_zone}")
+    delta_min, delta_max = compute_delta_target(ticker, iv_rank, vix_zone, "CSP", earnings_conservative)
+    logger.info(f"{ticker} CSP delta target: [{delta_min:.2f}, {delta_max:.2f}] | VIX zone: {vix_zone} | conservative: {earnings_conservative}")
 
     candidates = []
     for c in contracts:
@@ -117,15 +121,16 @@ def find_best_call(
     adjusted_cost_basis: float,
     max_dte: int,
     rescue_mode: bool = False,
+    earnings_conservative: bool = False,
 ) -> Optional[dict]:
     """
     From a list of call contract snapshots, return the best CC candidate.
     Hard rule: strike must be >= adjusted_cost_basis.
     """
-    delta_min, delta_max = compute_delta_target(ticker, iv_rank, vix_zone, "CC")
+    delta_min, delta_max = compute_delta_target(ticker, iv_rank, vix_zone, "CC", earnings_conservative)
     logger.info(
         f"{ticker} CC delta target: [{delta_min:.2f}, {delta_max:.2f}] | "
-        f"rescue={rescue_mode} | adj_cost_basis={adjusted_cost_basis:.2f}"
+        f"rescue={rescue_mode} | adj_cost_basis={adjusted_cost_basis:.2f} | conservative={earnings_conservative}"
     )
 
     candidates = []
