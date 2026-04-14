@@ -3,7 +3,6 @@ Daily summary report generator.
 Produces the formatted report defined in the strategy spec.
 """
 from datetime import date
-from typing import Optional
 
 
 def generate_daily_report(state: dict, ctx: dict) -> str:
@@ -16,6 +15,7 @@ def generate_daily_report(state: dict, ctx: dict) -> str:
     equity       = account.get("equity", 0)
     cash         = account.get("cash", 0)
     deployed     = equity - cash
+    pct_deployed = f"{deployed/equity:.1%}" if equity > 0 else "N/A"
 
     # Build positions table rows
     pos_rows = ""
@@ -119,7 +119,7 @@ TICKER SNAPSHOT
 ACCOUNT OVERVIEW
   Total Equity:       ${equity:>12,.2f}
   Cash Available:     ${cash:>12,.2f}
-  Capital Deployed:   ${deployed:>12,.2f}  ({deployed/equity:.1%} of account if equity > 0 else N/A)
+  Capital Deployed:   ${deployed:>12,.2f}  ({pct_deployed})
 
 ACTIVE POSITIONS
 ┌────────┬───────┬────────┬───────┬───────┬─────────┬────────┬───────────┐

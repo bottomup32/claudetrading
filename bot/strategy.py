@@ -244,21 +244,20 @@ class WheelStrategy:
         # Total capital cap
         equity = account["equity"]
         deployed = self._get_deployed_capital()
-        if deployed / equity > MAX_TOTAL_DEPLOYED_PCT:
+        if equity > 0 and deployed / equity > MAX_TOTAL_DEPLOYED_PCT:
             logger.info(f"Capital limit reached: {deployed/equity:.1%} > {MAX_TOTAL_DEPLOYED_PCT:.0%}")
             return
 
         # Rank eligible tickers and pick best
+        # Allow a new CSP if the other ticker is in CC stage (holding shares, no open put)
         eligible = []
         for ticker in TICKERS:
             pos = self.state["positions"].get(ticker)
             if pos:
-                continue  # already has position (could be CC stage after assignment)
-                # Actually allow CSP on other ticker if first is in CC stage:
                 if pos["stage"] == "CC":
-                    pass  # eligible
+                    pass  # CC stage = holding shares, still eligible to open CSP on this ticker
                 else:
-                    continue
+                    continue  # CSP already open on this ticker
 
             td = ctx["tickers"][ticker]
             reason = self._csp_entry_check(ticker, td, vix_zone, vix_params, account, earnings)
@@ -549,12 +548,14 @@ class WheelStrategy:
             return
 
         # Check earnings blackout for new expiry
+        # Block if earnings fall within BLACKOUT_DAYS after the new expiration
         earn_str = self.state["earnings"].get(ticker)
         if earn_str:
             earn_date = date.fromisoformat(earn_str[:10])
             new_exp   = date.fromisoformat(new_contract["expiration"])
-            if (earn_date - new_exp).days <= EARNINGS_BLACKOUT_DAYS:
-                logger.info(f"{ticker} roll blocked: new expiry crosses earnings blackout")
+            days_gap  = (earn_date - new_exp).days  # positive = earnings after expiry
+            if 0 <= days_gap <= EARNINGS_BLACKOUT_DAYS:
+                logger.info(f"{ticker} roll blocked: earnings {earn_str} within {days_gap}d of new expiry")
                 return
 
         # Execute: close old, open new

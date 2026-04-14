@@ -7,19 +7,17 @@ from typing import Optional
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import (
-    GetOptionContractsRequest,
     GetOrdersRequest,
     LimitOrderRequest,
 )
 from alpaca.trading.enums import (
     OrderSide, TimeInForce, OrderType, QueryOrderStatus,
-    ContractType, ExerciseStyle,
+    ContractType,
 )
 from alpaca.data.historical.option import OptionHistoricalDataClient
 from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.requests import (
     OptionChainRequest,
-    OptionSnapshotRequest,
     StockBarsRequest,
     StockLatestTradeRequest,
 )

@@ -84,16 +84,35 @@ def get_current_iv(ticker: str) -> float:
     """
     try:
         tk = yf.Ticker(ticker)
-        spot = tk.info.get("regularMarketPrice") or tk.fast_info.last_price
+
+        # Safely get spot price
+        spot = None
+        try:
+            spot = float(tk.fast_info.last_price)
+        except Exception:
+            pass
+        if not spot:
+            try:
+                spot = float(tk.info.get("regularMarketPrice") or 0)
+            except Exception:
+                pass
+        if not spot:
+            return 0.50
 
         # Find nearest expiry ~30 days out
         exps = tk.options
+        if not exps:
+            return 0.50
         target = date.today() + timedelta(days=30)
         nearest = min(exps, key=lambda e: abs((date.fromisoformat(e) - target).days))
 
+        # option_chain returns an OptionChain namedtuple with .calls and .puts
         chain = tk.option_chain(nearest)
-        # ATM strike = closest to spot
-        puts = chain.puts.copy()
+        puts = getattr(chain, "puts", chain[1] if len(chain) > 1 else None)
+        if puts is None or puts.empty:
+            return 0.50
+
+        puts = puts.copy()
         puts["dist"] = abs(puts["strike"] - spot)
         atm_put = puts.sort_values("dist").iloc[0]
         iv = float(atm_put.get("impliedVolatility", 0.50))
@@ -106,9 +125,20 @@ def get_current_iv(ticker: str) -> float:
 def get_stock_price_yf(ticker: str) -> float:
     """Fallback stock price via yfinance."""
     try:
-        return float(yf.Ticker(ticker).fast_info.last_price)
+        tk = yf.Ticker(ticker)
+        try:
+            price = float(tk.fast_info.last_price)
+            if price and price > 0:
+                return price
+        except Exception:
+            pass
+        # Fallback: last bar close
+        hist = tk.history(period="2d")
+        if not hist.empty:
+            return float(hist["Close"].iloc[-1])
     except Exception:
-        return 0.0
+        pass
+    return 0.0
 
 
 def get_qqq_daily_change() -> float:
@@ -127,24 +157,35 @@ def get_qqq_daily_change() -> float:
 def get_earnings_dates() -> dict:
     """
     Get next known earnings date for TSLA and PLTR.
-    Returns {ticker: date_string_or_None}.
+    yfinance 0.2.40+: tk.calendar returns a dict like:
+      {'Earnings Date': [Timestamp(...)], 'Revenue High': [...], ...}
+    Returns {ticker: 'YYYY-MM-DD' or None}.
     """
     results = {}
     for ticker in ["TSLA", "PLTR"]:
+        earn_str = None
         try:
             cal = yf.Ticker(ticker).calendar
-            if cal is not None and not cal.empty:
-                # calendar has Earnings Date as first column
+            if cal and isinstance(cal, dict):
+                # Key may be 'Earnings Date' or similar
+                for key in ("Earnings Date", "earningsDate", "earnings_date"):
+                    earn_list = cal.get(key, [])
+                    if earn_list:
+                        earn_dt = earn_list[0]
+                        if hasattr(earn_dt, "date"):
+                            earn_dt = earn_dt.date()
+                        earn_str = str(earn_dt)[:10]
+                        break
+            elif cal is not None and hasattr(cal, "columns"):
+                # Older yfinance: DataFrame
                 earnings_col = cal.columns[0]
-                earn_date = cal[earnings_col].iloc[0]
-                if hasattr(earn_date, "date"):
-                    earn_date = earn_date.date()
-                results[ticker] = str(earn_date)
-            else:
-                results[ticker] = None
+                earn_dt = cal[earnings_col].iloc[0]
+                if hasattr(earn_dt, "date"):
+                    earn_dt = earn_dt.date()
+                earn_str = str(earn_dt)[:10]
         except Exception as e:
             logger.warning(f"Earnings fetch failed for {ticker}: {e}")
-            results[ticker] = None
+        results[ticker] = earn_str
     return results
 
 
