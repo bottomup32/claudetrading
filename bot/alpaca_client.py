@@ -10,7 +10,6 @@ from alpaca.trading.requests import (
     GetOptionContractsRequest,
     GetOrdersRequest,
     LimitOrderRequest,
-    CancelOrderRequest,
 )
 from alpaca.trading.enums import (
     OrderSide, TimeInForce, OrderType, QueryOrderStatus,

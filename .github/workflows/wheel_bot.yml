@@ -83,6 +83,14 @@ jobs:
           fi
           python -m bot.main --task ${{ steps.task.outputs.task }} $FORCE_FLAG
 
+      - name: Show daily report
+        if: always()
+        run: |
+          echo "===== DAILY REPORT ====="
+          cat logs/daily_$(date -u +%Y-%m-%d).txt 2>/dev/null || echo "(no report generated yet)"
+          echo "===== BOT LOG ====="
+          cat logs/bot_$(date -u +%Y%m%d).log 2>/dev/null | tail -100 || echo "(no log)"
+
       - name: Commit state and logs
         if: always()
         run: |
