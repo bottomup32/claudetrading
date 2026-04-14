@@ -352,13 +352,36 @@ class WheelStrategy:
 
         # Ticker priority: higher IV Rank → better RSI position → PLTR tiebreaker
         eligible.sort(key=lambda x: (-x[1], abs(x[2] - 55), 0 if x[0] == "PLTR" else 1))
-        chosen_ticker = eligible[0][0]
-        chosen_conservative = eligible[0][3]
-        logger.info(f"Chosen ticker for new CSP: {chosen_ticker} (conservative={chosen_conservative})")
 
-        self._open_csp(chosen_ticker, vix_zone, vix_params, earnings_conservative=chosen_conservative)
+        simulated_cash = account["cash"]
 
-    def _open_csp(self, ticker: str, vix_zone: str, vix_params: dict, earnings_conservative: bool = False):
+        for item in eligible:
+            chosen_ticker = item[0]
+            chosen_conservative = item[3]
+            
+            # Re-check basic capital requirement with simulated cash
+            td = ctx["tickers"][chosen_ticker]
+            required = td["price"] * 100 * 0.80
+            if simulated_cash < required:
+                logger.info(f"{chosen_ticker} skipped during multi-entry: insufficient simulated cash (need ~${required:,.0f}, have ${simulated_cash:,.0f})")
+                continue
+
+            logger.info(f"Attempting new CSP for: {chosen_ticker} (conservative={chosen_conservative})")
+            
+            # Temporarily inject simulated_cash to avoid failing _open_csp checks inside
+            original_cash = self._market_context["account"]["cash"]
+            self._market_context["account"]["cash"] = simulated_cash
+            
+            success, required_capital = self._open_csp(chosen_ticker, vix_zone, vix_params, earnings_conservative=chosen_conservative)
+            
+            # Restore original cash in context
+            self._market_context["account"]["cash"] = original_cash
+            
+            if success and required_capital:
+                simulated_cash -= required_capital
+                logger.info(f"Successfully opened CSP for {chosen_ticker}. Simulated cash remaining: ${simulated_cash:,.0f}")
+
+    def _open_csp(self, ticker: str, vix_zone: str, vix_params: dict, earnings_conservative: bool = False) -> tuple[bool, float]:
         """Find and sell the best CSP for the given ticker."""
         td = self._market_context["tickers"][ticker]
         max_dte = min(CSP_MAX_DTE[ticker], vix_params["max_dte"])
@@ -372,19 +395,19 @@ class WheelStrategy:
         best = find_best_put(contracts, ticker, td["iv_rank"], vix_zone, max_dte, earnings_conservative=earnings_conservative)
         if not best:
             logger.warning(f"{ticker} CSP: no contract found")
-            return
+            return False, 0.0
 
         # Capital check
         required_capital = best["strike"] * 100
         account = self._market_context["account"]
         if required_capital > account["cash"]:
             logger.warning(f"{ticker} insufficient cash: need ${required_capital:,.0f}, have ${account['cash']:,.0f}")
-            return
+            return False, 0.0
 
         result = sell_option(self.client, best, ticker)
         if not result:
             logger.error(f"{ticker} CSP sell order failed")
-            return
+            return False, 0.0
 
         position = blank_position(
             ticker=ticker,
@@ -427,6 +450,7 @@ class WheelStrategy:
             rsi=td["rsi"], stock_price=stock_price,
             otm_pct=otm_pct, ann_return_pct=ann_ret,
         )
+        return True, required_capital
 
     def _open_cc(self, ticker: str):
         """Sell a covered call on assigned shares."""

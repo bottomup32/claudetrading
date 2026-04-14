@@ -4,16 +4,49 @@
     "PLTR": null
   },
   "performance": {
-    "TSLA": {"cycles": 0, "total_premium": 0.0, "realized_pnl": 0.0, "wins": 0, "losses": 0, "assignments": 0},
-    "PLTR": {"cycles": 0, "total_premium": 0.0, "realized_pnl": 0.0, "wins": 0, "losses": 0, "assignments": 0}
+    "TSLA": {
+      "cycles": 0,
+      "total_premium": 0.0,
+      "realized_pnl": 0.0,
+      "wins": 0,
+      "losses": 0,
+      "assignments": 0
+    },
+    "PLTR": {
+      "cycles": 0,
+      "total_premium": 0.0,
+      "realized_pnl": 0.0,
+      "wins": 0,
+      "losses": 0,
+      "assignments": 0
+    }
   },
   "iv_history": {
-    "TSLA": [],
-    "PLTR": []
+    "TSLA": [
+      {
+        "date": "2026-04-14",
+        "iv": 0.4309749285888672
+      }
+    ],
+    "PLTR": [
+      {
+        "date": "2026-04-14",
+        "iv": 0.6108437353515627
+      }
+    ]
   },
   "action_log": [],
-  "last_entry_date": {"TSLA": null, "PLTR": null},
-  "last_exit_date":  {"TSLA": null, "PLTR": null},
+  "last_entry_date": {
+    "TSLA": null,
+    "PLTR": null
+  },
+  "last_exit_date": {
+    "TSLA": null,
+    "PLTR": null
+  },
   "sector_stress_freeze_until": null,
-  "earnings": {"TSLA": null, "PLTR": null}
+  "earnings": {
+    "TSLA": "2026-04-22",
+    "PLTR": "2026-05-04"
+  }
 }
