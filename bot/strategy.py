@@ -34,6 +34,11 @@ from bot.options_engine import (
 from bot.order_manager import (
     sell_option, buy_to_close, get_current_option_snapshot, check_profit_pct,
 )
+from bot.data_logger import (
+    log_run, log_decision_open, log_decision_close, log_decision_skip,
+    log_decision_roll, log_decision_assignment, log_decision_expiry,
+    log_circuit_breaker, log_position_snapshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +48,7 @@ class WheelStrategy:
         self.client = AlpacaClient()
         self.state  = load_state()
         self._market_context: dict = {}
+        self._current_task: str = "unknown"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Public entry points (called by main.py per schedule)
@@ -51,6 +57,7 @@ class WheelStrategy:
     def morning_scan(self):
         """9:35 AM ET — Full morning check."""
         logger.info("=== MORNING SCAN ===")
+        self._current_task = "morning_scan"
         self._refresh_market_context()
         self._check_assignments()
         self._check_profit_targets()
@@ -62,6 +69,7 @@ class WheelStrategy:
     def midmorning_check(self):
         """11:00 AM ET — Fill confirmation + 50% profit check."""
         logger.info("=== MID-MORNING CHECK ===")
+        self._current_task = "midmorning_check"
         self._refresh_market_context()
         self._check_profit_targets()
         self._confirm_fills()
@@ -70,6 +78,7 @@ class WheelStrategy:
     def midday_review(self):
         """1:00 PM ET — Greeks, delta drift, rolling candidates."""
         logger.info("=== MIDDAY REVIEW ===")
+        self._current_task = "midday_review"
         self._refresh_market_context()
         self._check_profit_targets()
         self._evaluate_rolling()
@@ -78,6 +87,7 @@ class WheelStrategy:
     def afternoon_check(self):
         """3:00 PM ET — Profit targets + catalyst scan."""
         logger.info("=== AFTERNOON CHECK ===")
+        self._current_task = "afternoon_check"
         self._refresh_market_context()
         self._check_profit_targets()
         self._check_earnings_proximity()
@@ -86,6 +96,7 @@ class WheelStrategy:
     def preclose(self):
         """3:50 PM ET — Final decisions, unfilled order cleanup."""
         logger.info("=== PRE-CLOSE ===")
+        self._current_task = "preclose"
         self._refresh_market_context()
         self._check_profit_targets()
         self._cancel_unfilled_orders()
@@ -133,6 +144,21 @@ class WheelStrategy:
         self.state["earnings"] = earnings
         logger.info(f"VIX={vix:.1f} [{vix_zone}] | QQQ={qqq_chg:.2%} | cash=${account['cash']:,.0f}")
 
+        # ── Analytics: log every run ──────────────────────────────────────────
+        log_run(
+            task=self._current_task,
+            vix=vix,
+            vix_zone=vix_zone,
+            qqq_change=qqq_chg,
+            ticker_data=ticker_data,
+            account=account,
+            open_positions=count_open_positions(self.state),
+            state_summary={
+                t: (self.state["positions"][t]["stage"] if self.state["positions"][t] else None)
+                for t in TICKERS
+            },
+        )
+
     def _check_assignments(self):
         """Poll Alpaca activities for option assignment events (OPASN)."""
         activities = self.client.get_activities(["OPASN", "OPEXP", "OPEXC"])
@@ -164,6 +190,17 @@ class WheelStrategy:
                         "ticker": ticker, "strike": assignment_price,
                         "adj_cost_basis": adj_cost_basis,
                     })
+                    ctx = self._market_context
+                    td  = ctx.get("tickers", {}).get(ticker, {})
+                    log_decision_assignment(
+                        ticker=ticker,
+                        strike=assignment_price,
+                        total_csp_premiums=total_premiums,
+                        adj_cost_basis=adj_cost_basis,
+                        stock_price_at_assignment=td.get("price", assignment_price),
+                        iv_rank=td.get("iv_rank", 0),
+                        vix=ctx.get("vix", 0),
+                    )
 
             elif activity_type in ("OPEXP", "OPEXC"):
                 logger.info(f"EXPIRY/EXERCISE detected: {symbol} for {ticker}")
@@ -171,6 +208,17 @@ class WheelStrategy:
                 if pos and pos["stage"] == "CSP":
                     # Put expired worthless — good!
                     premium = pos["premium_received"]
+                    ctx = self._market_context
+                    td  = ctx.get("tickers", {}).get(ticker, {})
+                    log_decision_expiry(
+                        ticker=ticker, stage="CSP",
+                        contract=pos["contract"],
+                        entry_premium=premium,
+                        strike=pos["strike"],
+                        stock_price=td.get("price", 0),
+                        iv_rank=td.get("iv_rank", 0),
+                        vix=ctx.get("vix", 0),
+                    )
                     self._close_cycle(ticker, pos, pnl=premium * 100, reason="expired_worthless")
 
     def _check_profit_targets(self):
@@ -195,6 +243,31 @@ class WheelStrategy:
             dte         = (date.fromisoformat(pos["expiration"]) - date.today()).days
 
             logger.info(f"{ticker} {pos['stage']} P&L: {profit_pct:.1%} (DTE={dte})")
+
+            # ── Analytics: snapshot every position check ──────────────────────
+            td = ctx["tickers"][ticker]
+            rescue_mode = (
+                pos["stage"] == "CC"
+                and pos.get("assignment_price")
+                and td["price"] < pos["assignment_price"] * RESCUE_TRIGGER_PCT
+            )
+            log_position_snapshot(
+                ticker=ticker,
+                task=self._current_task,
+                stage=pos["stage"],
+                contract=pos["contract"],
+                strike=pos.get("strike", 0),
+                expiration=pos["expiration"],
+                dte=dte,
+                entry_premium=entry_prem,
+                current_mid=current_val,
+                profit_pct=profit_pct,
+                delta_now=snapshot.get("delta", 0),
+                iv_now=snapshot.get("iv", 0),
+                stock_price=td["price"],
+                vix=ctx["vix"],
+                rescue_mode=rescue_mode,
+            )
 
             should_close = False
             reason = ""
@@ -263,6 +336,11 @@ class WheelStrategy:
             reason = self._csp_entry_check(ticker, td, vix_zone, vix_params, account, earnings)
             if reason:
                 logger.info(f"{ticker} CSP BLOCKED: {reason}")
+                log_decision_skip(
+                    ticker=ticker, stage="CSP", reason=reason,
+                    details={"iv_rank": td["iv_rank"], "rsi": td["rsi"], "price": td["price"]},
+                    vix=ctx["vix"], vix_zone=vix_zone,
+                )
                 continue
 
             eligible.append((ticker, td["iv_rank"], td["rsi"]))
@@ -333,6 +411,21 @@ class WheelStrategy:
             "vix":       self._market_context["vix"],
         })
 
+        # ── Analytics ─────────────────────────────────────────────────────────
+        stock_price = td["price"]
+        otm_pct = (stock_price - best["strike"]) / stock_price if stock_price else 0
+        ann_ret = (result["filled_price"] / (best["strike"] * 100)) * (365 / best["dte"]) * 100
+        log_decision_open(
+            ticker=ticker, stage="CSP",
+            contract=best["symbol"], strike=best["strike"],
+            expiration=best["expiration"], dte=best["dte"],
+            delta=best["delta"], premium=result["filled_price"],
+            iv=best.get("iv", td["iv"]), iv_rank=td["iv_rank"],
+            vix=self._market_context["vix"], vix_zone=vix_zone,
+            rsi=td["rsi"], stock_price=stock_price,
+            otm_pct=otm_pct, ann_return_pct=ann_ret,
+        )
+
     def _open_cc(self, ticker: str):
         """Sell a covered call on assigned shares."""
         pos = self.state["positions"].get(ticker)
@@ -359,6 +452,7 @@ class WheelStrategy:
             if loss_pct <= CIRCUIT_BREAKER[ticker]:
                 logger.warning(f"{ticker} CIRCUIT BREAKER triggered ({loss_pct:.1%}) — stopping all activity")
                 log_action(self.state, "CIRCUIT_BREAKER", {"ticker": ticker, "loss_pct": loss_pct})
+                log_circuit_breaker(ticker=ticker, loss_pct=loss_pct, vix=ctx["vix"])
                 return
 
             # Pause CC if TSLA > 20% down and VIX > 30
@@ -408,6 +502,20 @@ class WheelStrategy:
             "adj_cost_basis": pos["adjusted_cost_basis"],
         })
 
+        # ── Analytics ─────────────────────────────────────────────────────────
+        otm_pct = (best["strike"] - td["price"]) / td["price"] if td["price"] else 0
+        ann_ret = (result["filled_price"] / (best["strike"] * 100)) * (365 / best["dte"]) * 100
+        log_decision_open(
+            ticker=ticker, stage="CC",
+            contract=best["symbol"], strike=best["strike"],
+            expiration=best["expiration"], dte=best["dte"],
+            delta=best["delta"], premium=result["filled_price"],
+            iv=best.get("iv", td["iv"]), iv_rank=td["iv_rank"],
+            vix=ctx["vix"], vix_zone=vix_zone,
+            rsi=td["rsi"], stock_price=td["price"],
+            otm_pct=otm_pct, ann_return_pct=ann_ret,
+        )
+
     def _close_position(self, ticker: str, pos: dict, snapshot: dict, reason: str, profit_pct: float):
         """Buy to close an open option position."""
         result = buy_to_close(self.client, snapshot, ticker)
@@ -429,6 +537,23 @@ class WheelStrategy:
             "realized_pnl":  realized_pnl,
             "reason":        reason,
         })
+
+        # ── Analytics ─────────────────────────────────────────────────────────
+        ctx = self._market_context
+        td  = ctx.get("tickers", {}).get(ticker, {})
+        dte_rem = (date.fromisoformat(pos["expiration"]) - date.today()).days
+        log_decision_close(
+            ticker=ticker, stage=pos["stage"],
+            contract=pos["contract"],
+            entry_premium=pos["premium_received"],
+            close_price=cost_to_close,
+            profit_pct=profit_pct,
+            dte_remaining=dte_rem,
+            reason=reason,
+            stock_price=td.get("price", 0),
+            iv_rank=td.get("iv_rank", 0),
+            vix=ctx.get("vix", 0),
+        )
 
         if pos["stage"] == "CSP":
             self._close_cycle(ticker, pos, pnl=realized_pnl, reason=reason)
@@ -582,6 +707,22 @@ class WheelStrategy:
             "net_credit": net_credit,
             "rolls_count": pos["rolls_count"],
         })
+
+        # ── Analytics ─────────────────────────────────────────────────────────
+        log_decision_roll(
+            ticker=ticker, stage=stage,
+            old_contract=current_snapshot["symbol"],
+            new_contract=new_contract["symbol"],
+            old_strike=pos.get("strike", 0),
+            new_strike=new_contract["strike"],
+            old_expiration=pos.get("expiration", ""),
+            new_expiration=new_contract["expiration"],
+            net_credit=net_credit,
+            direction=direction,
+            rolls_count=pos["rolls_count"],
+            stock_price=ctx["tickers"][ticker]["price"],
+            vix=ctx["vix"],
+        )
 
     def _check_earnings_proximity(self):
         """Close/flag positions approaching earnings blackout."""
