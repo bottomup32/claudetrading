@@ -5,8 +5,8 @@ All strategy constants in one place.
 import os
 
 # ── Alpaca credentials (set as env vars in GitHub Actions secrets) ───────────
-ALPACA_API_KEY    = os.getenv("ALPACA_API_KEY",    "PKQWMIBD2LVAFAQZYEAJFFI4Y6")
-ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "D9aYULaGv3DaoGS6TtfbQ2wafcf5tQft3iEyRKNAmFJ4")
+ALPACA_API_KEY    = os.getenv("ALPACA_API_KEY",    "PKUY7XNURSF2AWZHOJJ6OI7DC5")
+ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "2xgHCxkzoXbdt8ASqJ3177mF6M4sSTmnzX3gs8V2e92C")
 ALPACA_BASE_URL   = os.getenv("ALPACA_BASE_URL",   "https://paper-api.alpaca.markets")
 PAPER_TRADING     = True
 
