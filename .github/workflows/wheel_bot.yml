@@ -1,0 +1,93 @@
+name: Adaptive Wheel Strategy Bot
+
+on:
+  schedule:
+    # All times in UTC — strategy runs ET (UTC-4 during EDT / UTC-5 during EST)
+    # Currently EDT (April): ET = UTC - 4
+    - cron: '35 13 * * 1-5'   # 9:35 AM ET  → morning_scan
+    - cron: '0  15 * * 1-5'   # 11:00 AM ET → midmorning_check
+    - cron: '0  17 * * 1-5'   # 1:00 PM ET  → midday_review
+    - cron: '0  19 * * 1-5'   # 3:00 PM ET  → afternoon_check
+    - cron: '50 19 * * 1-5'   # 3:50 PM ET  → preclose
+
+  # Allow manual trigger from GitHub UI for testing
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'Task to run'
+        required: true
+        default: 'morning_scan'
+        type: choice
+        options:
+          - morning_scan
+          - midmorning_check
+          - midday_review
+          - afternoon_check
+          - preclose
+      force:
+        description: 'Force run even if market closed'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Determine task from schedule
+        id: task
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "task=${{ github.event.inputs.task }}" >> $GITHUB_OUTPUT
+            echo "force=${{ github.event.inputs.force }}" >> $GITHUB_OUTPUT
+          else
+            # Map UTC cron time to task name
+            HOUR=$(date -u +%H)
+            MIN=$(date -u +%M)
+            TIME="${HOUR}${MIN}"
+            if   [ "$TIME" -ge "1335" ] && [ "$TIME" -lt "1400" ]; then echo "task=morning_scan"     >> $GITHUB_OUTPUT
+            elif [ "$TIME" -ge "1500" ] && [ "$TIME" -lt "1530" ]; then echo "task=midmorning_check" >> $GITHUB_OUTPUT
+            elif [ "$TIME" -ge "1700" ] && [ "$TIME" -lt "1730" ]; then echo "task=midday_review"    >> $GITHUB_OUTPUT
+            elif [ "$TIME" -ge "1900" ] && [ "$TIME" -lt "1950" ]; then echo "task=afternoon_check"  >> $GITHUB_OUTPUT
+            elif [ "$TIME" -ge "1950" ] && [ "$TIME" -lt "2100" ]; then echo "task=preclose"         >> $GITHUB_OUTPUT
+            else echo "task=morning_scan" >> $GITHUB_OUTPUT
+            fi
+            echo "force=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run bot
+        env:
+          ALPACA_API_KEY:    ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          ALPACA_BASE_URL:   https://paper-api.alpaca.markets
+        run: |
+          FORCE_FLAG=""
+          if [ "${{ steps.task.outputs.force }}" = "true" ]; then
+            FORCE_FLAG="--force"
+          fi
+          python -m bot.main --task ${{ steps.task.outputs.task }} $FORCE_FLAG
+
+      - name: Commit state and logs
+        if: always()
+        run: |
+          git config user.name  "WheelBot"
+          git config user.email "bot@users.noreply.github.com"
+          git add data/state.json logs/ || true
+          git diff --staged --quiet || git commit -m "bot: state update $(date -u +%Y-%m-%dT%H:%M:%SZ) [${{ steps.task.outputs.task }}]"
+          git push || true

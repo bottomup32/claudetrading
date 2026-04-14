@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+*.log
+# Keep state.json and logs in git (bot commits them)
+!data/state.json
+!logs/*.txt

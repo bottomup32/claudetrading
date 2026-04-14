@@ -1,0 +1,19 @@
+{
+  "positions": {
+    "TSLA": null,
+    "PLTR": null
+  },
+  "performance": {
+    "TSLA": {"cycles": 0, "total_premium": 0.0, "realized_pnl": 0.0, "wins": 0, "losses": 0, "assignments": 0},
+    "PLTR": {"cycles": 0, "total_premium": 0.0, "realized_pnl": 0.0, "wins": 0, "losses": 0, "assignments": 0}
+  },
+  "iv_history": {
+    "TSLA": [],
+    "PLTR": []
+  },
+  "action_log": [],
+  "last_entry_date": {"TSLA": null, "PLTR": null},
+  "last_exit_date":  {"TSLA": null, "PLTR": null},
+  "sector_stress_freeze_until": null,
+  "earnings": {"TSLA": null, "PLTR": null}
+}
