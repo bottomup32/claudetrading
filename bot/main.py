@@ -12,7 +12,7 @@ Usage:
 import argparse
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 import pytz
 
 from bot.config import LOG_DIR
@@ -21,7 +21,7 @@ from bot.strategy import WheelStrategy
 
 # ── Logging Setup ─────────────────────────────────────────────────────────────
 LOG_DIR.mkdir(parents=True, exist_ok=True)
-log_file = LOG_DIR / f"bot_{datetime.utcnow().strftime('%Y%m%d')}.log"
+log_file = LOG_DIR / f"bot_{datetime.now(timezone.utc).strftime('%Y%m%d')}.log"
 
 logging.basicConfig(
     level=logging.INFO,

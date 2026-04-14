@@ -11,7 +11,7 @@ so the full history accumulates for analysis.
 """
 import json
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -40,7 +40,7 @@ def _append(filepath: Path, record: dict):
 
 
 def _ts() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _iv_rank_bucket(iv_rank: float) -> str:
@@ -78,7 +78,7 @@ def log_run(
         "account_equity": round(account.get("equity", 0), 2),
         "account_cash":   round(account.get("cash", 0), 2),
         "capital_deployed_pct": round(
-            (account.get("equity", 0) - account.get("cash", 0)) / account.get("equity", 1) * 100, 1
+            (account.get("equity", 0) - account.get("cash", 0)) / (account.get("equity") or 1) * 100, 1
         ),
         "positions": state_summary,
     }
