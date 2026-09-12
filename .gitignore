@@ -1,10 +1,12 @@
-__pycache__/
-*.py[cod]
-*.egg-info/
-.env
-*.log
-# Keep state, logs, and analytics in git (bot commits them)
-!data/state.json
 !data/analytics/
 !data/analytics/*.jsonl
+!data/state.json
 !logs/*.txt
+# Keep state, logs, and analytics in git (bot commits them)
+*.egg-info/
+*.log
+*.py[cod]
+*.pyc
+.env
+.pytest_cache/
+__pycache__/

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>한→중·영·일 동시 번역기</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --line:#e3e6ea; --text:#1d2229; --muted:#6b7480; --accent:#2f6fed; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171c; --card:#1d2129; --line:#2c323c; --text:#e8ebef; --muted:#9aa3b0; --accent:#5b8dff; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:24px 16px 48px; background:var(--bg); color:var(--text);
+         font:15px/1.6 -apple-system,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",system-ui,sans-serif; }
+  main { max-width:960px; margin:0 auto; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 20px; font-size:14px; }
+  textarea { width:100%; min-height:140px; padding:14px; border:1px solid var(--line); border-radius:10px;
+             background:var(--card); color:var(--text); font:inherit; resize:vertical; }
+  textarea:focus { outline:2px solid var(--accent); border-color:transparent; }
+  .row { display:flex; gap:12px; align-items:center; margin:12px 0 24px; flex-wrap:wrap; }
+  button { padding:10px 20px; border:0; border-radius:8px; background:var(--accent); color:#fff;
+           font:inherit; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.55; cursor:default; }
+  button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); }
+  .count { color:var(--muted); font-size:13px; margin-left:auto; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; min-height:120px; }
+  .card header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .card h2 { font-size:14px; margin:0; color:var(--muted); font-weight:600; letter-spacing:.02em; }
+  .card p { margin:0; white-space:pre-wrap; word-break:break-word; }
+  .copy { font-size:12px; padding:4px 10px; background:transparent; color:var(--accent); border:1px solid var(--line); }
+  .error { color:#d64545; margin:0 0 16px; min-height:1.4em; }
+  .loading p { color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>한국어 → 중국어 · 영어 · 일본어</h1>
+  <p class="sub">한국어를 입력하면 세 언어로 한 번에 번역합니다. (Ctrl/⌘ + Enter로 실행)</p>
+
+  <textarea id="src" placeholder="여기에 한국어를 입력하세요…" maxlength="{{ max_chars }}" autofocus></textarea>
+  <div class="row">
+    <button id="go">번역하기</button>
+    <button id="clear" class="ghost">지우기</button>
+    <span class="count"><span id="n">0</span> / {{ max_chars }}</span>
+  </div>
+  <p id="err" class="error"></p>
+
+  <div class="grid">
+    <section class="card" data-lang="zh"><header><h2>中文 (简体)</h2><button class="copy">복사</button></header><p></p></section>
+    <section class="card" data-lang="en"><header><h2>English</h2><button class="copy">복사</button></header><p></p></section>
+    <section class="card" data-lang="ja"><header><h2>日本語</h2><button class="copy">복사</button></header><p></p></section>
+  </div>
+</main>
+
+<script>
+const src = document.getElementById('src');
+const go = document.getElementById('go');
+const clearBtn = document.getElementById('clear');
+const err = document.getElementById('err');
+const n = document.getElementById('n');
+const cards = {};
+document.querySelectorAll('.card').forEach(c => cards[c.dataset.lang] = c);
+
+src.addEventListener('input', () => n.textContent = src.value.length);
+src.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') run(); });
+go.addEventListener('click', run);
+clearBtn.addEventListener('click', () => { src.value = ''; n.textContent = 0; setAll(''); err.textContent = ''; src.focus(); });
+
+document.querySelectorAll('.copy').forEach(b => b.addEventListener('click', async () => {
+  const text = b.closest('.card').querySelector('p').textContent;
+  if (!text) return;
+  try { await navigator.clipboard.writeText(text); b.textContent = '복사됨'; setTimeout(() => b.textContent = '복사', 1200); }
+  catch { b.textContent = '실패'; }
+}));
+
+function setAll(text, loading) {
+  for (const c of Object.values(cards)) { c.querySelector('p').textContent = text; c.classList.toggle('loading', !!loading); }
+}
+
+async function run() {
+  const text = src.value.trim();
+  if (!text) { err.textContent = '번역할 텍스트를 입력해 주세요.'; return; }
+  err.textContent = '';
+  go.disabled = true; go.textContent = '번역 중…';
+  setAll('번역 중…', true);
+  try {
+    const r = await fetch('/api/translate', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ text }) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    for (const [lang, c] of Object.entries(cards)) { c.querySelector('p').textContent = data[lang] || ''; c.classList.remove('loading'); }
+  } catch (e) {
+    setAll('');
+    err.textContent = e.message;
+  } finally {
+    go.disabled = false; go.textContent = '번역하기';
+  }
+}
+</script>
+</body>
+</html>
