@@ -1,0 +1,274 @@
+<title>삼국어 번역기</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg: #F5F7F4;
+    --card: #FFFFFF;
+    --line: #D9E0DB;
+    --text: #1B2431;
+    --muted: #66716F;
+    --accent: #0F6E6B;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #E3F0EE;
+    --danger: #B3402E;
+    --shadow: 0 1px 2px rgba(27,36,49,.06), 0 6px 20px rgba(27,36,49,.05);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111618; --card: #1A2226; --line: #2B363A; --text: #E4EBE7; --muted: #94A19D;
+      --accent: #4FBBB6; --accent-ink: #0B1A19; --accent-soft: #17302F; --danger: #E5836F;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.25);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111618; --card: #1A2226; --line: #2B363A; --text: #E4EBE7; --muted: #94A19D;
+    --accent: #4FBBB6; --accent-ink: #0B1A19; --accent-soft: #17302F; --danger: #E5836F;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.25);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding-block: 20px 56px; padding-inline: 16px;
+    background: var(--bg); color: var(--text);
+    font-family: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+    font-size: 16px; line-height: 1.6;
+  }
+  main { max-width: 680px; margin: 0 auto; display: grid; gap: 20px; }
+
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -.01em; text-wrap: balance; }
+  h1 small { font-weight: 400; color: var(--muted); font-size: 14px; margin-left: 8px; }
+  #status { font-size: 13px; color: var(--muted); }
+
+  .input { background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+  .input label { display: block; padding: 12px 16px 0; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  textarea {
+    display: block; width: 100%; min-height: 128px; padding: 8px 16px 12px; border: 0; resize: vertical;
+    background: transparent; color: var(--text); font: inherit; font-size: 17px; line-height: 1.55;
+  }
+  textarea:focus { outline: none; }
+  .input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .count { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; margin-left: auto; }
+
+  button { font: inherit; cursor: pointer; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); padding: 9px 14px; font-size: 14px; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; padding-inline: 20px; }
+  button.quiet { border-color: transparent; color: var(--muted); }
+  button.small { padding: 5px 10px; font-size: 13px; }
+  .mode { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); user-select: none; }
+  .mode input { accent-color: var(--accent); margin: 0; }
+
+  #err { color: var(--danger); font-size: 14px; margin: -8px 0 0; }
+  #err:empty { display: none; }
+
+  .results { display: grid; gap: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px 16px; }
+  .card header { margin-bottom: 6px; }
+  .card h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .04em; color: var(--accent); }
+  .card h2 span { color: var(--muted); font-weight: 400; margin-left: 6px; letter-spacing: 0; }
+  .actions { display: flex; gap: 6px; }
+  .card p { margin: 0; min-height: 1.6em; white-space: pre-wrap; word-break: break-word; font-size: 17px; }
+  .card p:lang(zh) { font-family: "IBM Plex Sans KR", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .card p:lang(ja) { font-family: "IBM Plex Sans KR", "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif; }
+  .card.pending p { color: var(--muted); }
+  .card.example { border-style: dashed; }
+  .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; margin-left: 8px; vertical-align: middle; }
+
+  .history h3 { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; display: flex; justify-content: space-between; align-items: center; }
+  .history ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .history li button { width: 100%; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 8px 12px; font-size: 14px; }
+  .history:empty { display: none; }
+
+  .note { font-size: 13px; color: var(--muted); }
+  .note code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+  @media (prefers-reduced-motion: no-preference) {
+    .card.pending p { animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: .45; } }
+  }
+</style>
+
+<main>
+  <header>
+    <h1>삼국어 번역기 <small>한국어 → 中文 · English · 日本語</small></h1>
+    <span id="status">준비 중…</span>
+  </header>
+
+  <section class="input">
+    <label for="src">한국어 입력</label>
+    <textarea id="src" placeholder="번역할 한국어를 입력하세요" maxlength="4000">내일 오후 3시 회의는 온라인으로 진행합니다. 자료는 오늘 안에 공유해 주세요.</textarea>
+    <div class="bar">
+      <button id="go" class="primary">번역</button>
+      <button id="stop" hidden>중지</button>
+      <button id="clear" class="quiet">지우기</button>
+      <label class="mode"><input type="checkbox" id="careful"> 정확 모드 (느림)</label>
+      <span class="count"><span id="n">0</span> / 4000</span>
+    </div>
+  </section>
+
+  <p id="err" role="alert"></p>
+
+  <section class="results" id="results">
+    <article class="card example" data-lang="zh">
+      <header style="display:flex;justify-content:space-between;align-items:center">
+        <h2>中文<span>简体</span><em class="tag">예시</em></h2>
+        <div class="actions"><button class="small copy">복사</button><button class="small share" hidden>공유</button></div>
+      </header>
+      <p lang="zh">明天下午3点的会议将在线进行。请在今天之内分享资料。</p>
+    </article>
+    <article class="card example" data-lang="en">
+      <header style="display:flex;justify-content:space-between;align-items:center">
+        <h2>English<em class="tag">예시</em></h2>
+        <div class="actions"><button class="small copy">복사</button><button class="small share" hidden>공유</button></div>
+      </header>
+      <p lang="en">Tomorrow's 3 PM meeting will be held online. Please share the materials by the end of today.</p>
+    </article>
+    <article class="card example" data-lang="ja">
+      <header style="display:flex;justify-content:space-between;align-items:center">
+        <h2>日本語<em class="tag">예시</em></h2>
+        <div class="actions"><button class="small copy">복사</button><button class="small share" hidden>공유</button></div>
+      </header>
+      <p lang="ja">明日午後3時の会議はオンラインで行います。資料は今日中に共有してください。</p>
+    </article>
+  </section>
+
+  <section class="history" id="history"></section>
+
+  <p class="note">번역은 이 페이지를 연 사람의 Claude 계정으로 실행됩니다. 처음 한 번 허용 창이 뜹니다. 안드로이드 Chrome에서 메뉴 → "홈 화면에 추가"를 누르면 앱처럼 쓸 수 있습니다.</p>
+</main>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const src = $("#src"), go = $("#go"), stop = $("#stop"), clearBtn = $("#clear"), careful = $("#careful");
+  const err = $("#err"), n = $("#n"), status = $("#status"), historyEl = $("#history");
+  const cards = {};
+  document.querySelectorAll(".card").forEach((c) => (cards[c.dataset.lang] = c));
+  const LANGS = ["zh", "en", "ja"];
+  const HISTORY_KEY = "samgugeo.history.v1";
+  let sample = null, ctl = null;
+
+  n.textContent = src.value.length;
+  src.addEventListener("input", () => (n.textContent = src.value.length));
+  src.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") run(); });
+  go.addEventListener("click", run);
+  stop.addEventListener("click", () => ctl?.abort());
+  clearBtn.addEventListener("click", () => { src.value = ""; n.textContent = 0; setAll("", false); err.textContent = ""; src.focus(); });
+
+  const canShare = typeof navigator.share === "function";
+  document.querySelectorAll(".share").forEach((b) => (b.hidden = !canShare));
+  document.querySelectorAll(".copy").forEach((b) => b.addEventListener("click", async () => {
+    const text = b.closest(".card").querySelector("p").textContent;
+    if (!text) return;
+    try { await navigator.clipboard.writeText(text); flash(b, "복사됨"); } catch { flash(b, "복사 실패"); }
+  }));
+  document.querySelectorAll(".share").forEach((b) => b.addEventListener("click", async () => {
+    const text = b.closest(".card").querySelector("p").textContent;
+    if (!text) return;
+    try { await navigator.share({ text }); } catch {}
+  }));
+  function flash(b, label) { const old = b.textContent; b.textContent = label; setTimeout(() => (b.textContent = old), 1200); }
+
+  function setAll(text, pending) {
+    for (const c of Object.values(cards)) {
+      c.querySelector("p").textContent = text;
+      c.classList.toggle("pending", !!pending);
+      c.classList.remove("example");
+      c.querySelector(".tag")?.remove();
+    }
+  }
+  function setResults(data) {
+    for (const l of LANGS) {
+      const c = cards[l];
+      c.querySelector("p").textContent = typeof data[l] === "string" ? data[l] : "";
+      c.classList.remove("pending", "example");
+      c.querySelector(".tag")?.remove();
+    }
+  }
+
+  const COPY = {
+    not_granted: "이 페이지의 Claude 사용이 허용되지 않았습니다. 허용 창에서 '허용'을 눌러 주세요.",
+    sampling_disabled: "이 계정에서는 Claude를 사용할 수 없습니다.",
+    rate_limited: "요청이 너무 잦거나 사용량 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.",
+    session_expired: "로그인이 만료되었습니다. 다시 로그인해 주세요.",
+    refused: "이 내용은 번역할 수 없다고 응답했습니다. 문장을 바꿔서 시도해 주세요.",
+    invalid_json: "응답 형식이 맞지 않았습니다. 다시 한번 눌러 주세요.",
+    prompt_too_large: "텍스트가 너무 깁니다. 나눠서 번역해 주세요.",
+    empty_completion: "빈 응답이 왔습니다. 문장을 조금 바꿔 다시 시도해 주세요.",
+    upstream_error: "연결에 문제가 있었습니다. 다시 시도해 주세요.",
+  };
+
+  function prompt(text) {
+    return `You are a professional translator. Translate the Korean text below into Simplified Chinese, English, and Japanese.
+Preserve meaning, tone, register (formal/informal), and line breaks. Keep names, numbers, and URLs intact. No explanations, no romanization.
+Reply with ONLY one JSON object: {"zh": "...", "en": "...", "ja": "..."}
+
+Korean text:
+${text}`;
+  }
+
+  async function run() {
+    const text = src.value.trim();
+    if (!text) { err.textContent = "번역할 한국어를 입력해 주세요."; return; }
+    if (!sample) { err.textContent = "이 화면에서는 Claude를 호출할 수 없습니다. claude.ai에서 이 페이지를 열어 주세요."; return; }
+    err.textContent = "";
+    ctl = new AbortController();
+    go.disabled = true; stop.hidden = false; src.readOnly = true;
+    setAll("번역 중…", true);
+    const t0 = Date.now();
+    try {
+      const data = await sample.json(prompt(text), {
+        signal: ctl.signal,
+        modelTier: careful.checked ? "default" : "quick",
+      });
+      if (!data || typeof data !== "object") throw { code: "invalid_json", message: "not an object" };
+      setResults(data);
+      status.textContent = `${((Date.now() - t0) / 1000).toFixed(1)}초`;
+      pushHistory(text, data);
+    } catch (e) {
+      setAll("", false);
+      if (e?.code !== "cancelled") err.textContent = COPY[e?.code] ?? COPY.upstream_error;
+      if (e?.code === "not_granted" || e?.code === "sampling_disabled") { sample = null; status.textContent = "사용 불가"; }
+    } finally {
+      go.disabled = false; stop.hidden = true; src.readOnly = false; ctl = null;
+    }
+  }
+
+  // Recent translations: per-device convenience only.
+  function loadHistory() { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); } catch { return []; } }
+  function pushHistory(text, data) {
+    const items = loadHistory().filter((i) => i.text !== text);
+    items.unshift({ text, zh: data.zh, en: data.en, ja: data.ja });
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, 20))); } catch {}
+    renderHistory();
+  }
+  function renderHistory() {
+    const items = loadHistory();
+    historyEl.innerHTML = "";
+    if (!items.length) return;
+    const h = document.createElement("h3");
+    h.textContent = "최근 번역";
+    const clr = document.createElement("button"); clr.className = "small quiet"; clr.textContent = "모두 지우기";
+    clr.onclick = () => { try { localStorage.removeItem(HISTORY_KEY); } catch {} renderHistory(); };
+    h.append(clr);
+    const ul = document.createElement("ul");
+    for (const it of items) {
+      const li = document.createElement("li"), b = document.createElement("button");
+      b.textContent = it.text;
+      b.onclick = () => { src.value = it.text; n.textContent = it.text.length; setResults(it); err.textContent = ""; window.scrollTo({ top: 0, behavior: "smooth" }); };
+      li.append(b); ul.append(li);
+    }
+    historyEl.append(h, ul);
+  }
+  renderHistory();
+
+  (async () => {
+    sample = window.claude?.use ? await window.claude.use("sample") : null;
+    status.textContent = sample ? "준비됨" : "사용 불가 (claude.ai에서 열어 주세요)";
+    if (!sample) go.disabled = true;
+  })();
+})();
+</script>

@@ -26,7 +26,7 @@ def client():
 
 def test_translate_parses_three_languages():
     payload = {"zh": "你好", "en": "Hello", "ja": "こんにちは"}
-    with patch.object(tr, "get_client") as gc:
+    with patch.object(tr, "get_client") as gc, patch.object(tr, "BACKEND", "claude"):
         gc.return_value.messages.create.return_value = fake_response(payload)
         result = tr.translate("안녕하세요")
     assert result.as_dict() == payload
@@ -41,7 +41,7 @@ def test_translate_rejects_empty():
 
 
 def test_translate_refusal_raises():
-    with patch.object(tr, "get_client") as gc:
+    with patch.object(tr, "get_client") as gc, patch.object(tr, "BACKEND", "claude"):
         gc.return_value.messages.create.return_value = fake_response({}, stop_reason="refusal")
         with pytest.raises(RuntimeError):
             tr.translate("테스트")
@@ -64,3 +64,11 @@ def test_index_renders(client):
     r = client.get("/")
     assert r.status_code == 200
     assert "번역" in r.get_data(as_text=True)
+
+
+def test_free_backend_selected_without_key(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with patch.object(tr, "BACKEND", "auto"), patch.object(tr, "translate_free") as free:
+        free.return_value = tr.Translation(zh="a", en="b", ja="c")
+        assert tr.translate("테스트").en == "b"
+        free.assert_called_once()

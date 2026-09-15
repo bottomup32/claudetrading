@@ -2,6 +2,13 @@
 
 한국어를 입력하면 Claude API 한 번 호출로 간체 중국어, 영어, 일본어를 동시에 돌려주는 작은 웹앱입니다.
 
+## 키 없이 쓰는 방법
+
+1. **Claude 아티팩트 (권장, 안드로이드에서 바로 사용)** — `translator/artifact/samgugeo.html`을 claude.ai 아티팩트로 게시하면
+   여는 사람의 Claude 구독으로 번역이 실행됩니다. API 키 불필요. Chrome에서 "홈 화면에 추가"로 앱처럼 사용.
+2. **무료 백엔드** — `ANTHROPIC_API_KEY`가 없으면 Flask 앱이 자동으로 `deep-translator`(구글 번역 웹 엔드포인트)로 동작합니다.
+   비공식 엔드포인트라 품질과 안정성은 낮습니다. `TRANSLATOR_BACKEND=free|claude|auto`로 강제할 수 있습니다.
+
 ## 실행
 
 ```bash
@@ -30,8 +37,9 @@ echo "안녕하세요" | python -m translator.cli
 
 | 이름 | 설명 |
 |---|---|
-| `ANTHROPIC_API_KEY` | 필수. Anthropic API 키 |
+| `ANTHROPIC_API_KEY` | 선택. 없으면 무료 백엔드로 전환 |
 | `TRANSLATOR_MODEL` | 선택. 기본값 `claude-opus-5` |
+| `TRANSLATOR_BACKEND` | 선택. `auto`(기본)·`claude`·`free` |
 | `PORT` | 선택. 기본값 5000 |
 
 ## 테스트

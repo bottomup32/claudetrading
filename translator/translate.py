@@ -58,11 +58,34 @@ def get_client() -> anthropic.Anthropic:
     return _client
 
 
+BACKEND = os.environ.get("TRANSLATOR_BACKEND", "auto")  # auto | claude | free
+
+
 def translate(text: str) -> Translation:
+    """Translate via Claude when an API key is present, else via the free backend."""
     text = text.strip()
     if not text:
         raise ValueError("입력 텍스트가 비어 있습니다.")
+    backend = BACKEND
+    if backend == "auto":
+        backend = "claude" if os.environ.get("ANTHROPIC_API_KEY") else "free"
+    return translate_claude(text) if backend == "claude" else translate_free(text)
 
+
+def translate_free(text: str) -> Translation:
+    """No-key fallback: deep-translator's Google Translate web endpoint.
+
+    Unofficial and rate-limited; quality is lower than Claude. Good enough for a POC.
+    """
+    from deep_translator import GoogleTranslator  # imported lazily: optional dependency
+
+    out = {}
+    for code, target in (("zh", "zh-CN"), ("en", "en"), ("ja", "ja")):
+        out[code] = GoogleTranslator(source="ko", target=target).translate(text) or ""
+    return Translation(**out)
+
+
+def translate_claude(text: str) -> Translation:
     response = get_client().messages.create(
         model=MODEL,
         max_tokens=16000,
