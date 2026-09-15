@@ -61,6 +61,7 @@
   button.small { padding: 5px 10px; font-size: 13px; }
   .mode { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); user-select: none; }
   .mode input { accent-color: var(--accent); margin: 0; }
+  #mic.listening { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
   #err { color: var(--danger); font-size: 14px; margin: -8px 0 0; }
   #err:empty { display: none; }
@@ -101,10 +102,12 @@
     <label for="src">한국어 입력</label>
     <textarea id="src" placeholder="번역할 한국어를 입력하세요" maxlength="4000">내일 오후 3시 회의는 온라인으로 진행합니다. 자료는 오늘 안에 공유해 주세요.</textarea>
     <div class="bar">
+      <button id="mic" title="마이크로 말하기" aria-label="마이크로 말하기" hidden>🎤 말하기</button>
       <button id="go" class="primary">번역</button>
       <button id="stop" hidden>중지</button>
       <button id="clear" class="quiet">지우기</button>
-      <label class="mode"><input type="checkbox" id="careful"> 정확 모드 (느림)</label>
+      <label class="mode"><input type="checkbox" id="careful"> 정확 모드</label>
+      <label class="mode"><input type="checkbox" id="autorun" checked> 말한 뒤 자동 번역</label>
       <span class="count"><span id="n">0</span> / 4000</span>
     </div>
   </section>
@@ -115,21 +118,21 @@
     <article class="card example" data-lang="zh">
       <header style="display:flex;justify-content:space-between;align-items:center">
         <h2>中文<span>简体</span><em class="tag">예시</em></h2>
-        <div class="actions"><button class="small copy">복사</button><button class="small share" hidden>공유</button></div>
+        <div class="actions"><button class="small speak" hidden>듣기</button><button class="small copy">복사</button><button class="small share" hidden>공유</button></div>
       </header>
       <p lang="zh">明天下午3点的会议将在线进行。请在今天之内分享资料。</p>
     </article>
     <article class="card example" data-lang="en">
       <header style="display:flex;justify-content:space-between;align-items:center">
         <h2>English<em class="tag">예시</em></h2>
-        <div class="actions"><button class="small copy">복사</button><button class="small share" hidden>공유</button></div>
+        <div class="actions"><button class="small speak" hidden>듣기</button><button class="small copy">복사</button><button class="small share" hidden>공유</button></div>
       </header>
       <p lang="en">Tomorrow's 3 PM meeting will be held online. Please share the materials by the end of today.</p>
     </article>
     <article class="card example" data-lang="ja">
       <header style="display:flex;justify-content:space-between;align-items:center">
         <h2>日本語<em class="tag">예시</em></h2>
-        <div class="actions"><button class="small copy">복사</button><button class="small share" hidden>공유</button></div>
+        <div class="actions"><button class="small speak" hidden>듣기</button><button class="small copy">복사</button><button class="small share" hidden>공유</button></div>
       </header>
       <p lang="ja">明日午後3時の会議はオンラインで行います。資料は今日中に共有してください。</p>
     </article>
@@ -137,13 +140,13 @@
 
   <section class="history" id="history"></section>
 
-  <p class="note">번역은 이 페이지를 연 사람의 Claude 계정으로 실행됩니다. 처음 한 번 허용 창이 뜹니다. 안드로이드 Chrome에서 메뉴 → "홈 화면에 추가"를 누르면 앱처럼 쓸 수 있습니다.</p>
+  <p class="note">🎤 버튼을 누르고 한국어로 말하면 받아 적은 뒤 자동으로 번역합니다. 번역은 이 페이지를 연 사람의 Claude 계정으로 실행되며, 처음 한 번 허용 창이 뜹니다. 안드로이드 Chrome에서 메뉴 → "홈 화면에 추가"를 누르면 앱처럼 쓸 수 있습니다.</p>
 </main>
 
 <script>
 (() => {
   const $ = (s) => document.querySelector(s);
-  const src = $("#src"), go = $("#go"), stop = $("#stop"), clearBtn = $("#clear"), careful = $("#careful");
+  const src = $("#src"), go = $("#go"), stop = $("#stop"), clearBtn = $("#clear"), careful = $("#careful"), autoRun = $("#autorun");
   const err = $("#err"), n = $("#n"), status = $("#status"), historyEl = $("#history");
   const cards = {};
   document.querySelectorAll(".card").forEach((c) => (cards[c.dataset.lang] = c));
@@ -170,6 +173,49 @@
     if (!text) return;
     try { await navigator.share({ text }); } catch {}
   }));
+  // Voice input (Android Chrome supports webkitSpeechRecognition).
+  const mic = $("#mic");
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null;
+  if (SR) {
+    mic.hidden = false;
+    mic.addEventListener("click", () => {
+      if (rec) { rec.stop(); return; }
+      rec = new SR();
+      rec.lang = "ko-KR"; rec.interimResults = true; rec.continuous = false;
+      const base = src.value.trim() ? src.value.trim() + " " : "";
+      rec.onresult = (ev) => {
+        let t = "";
+        for (const r of ev.results) t += r[0].transcript;
+        src.value = base + t; n.textContent = src.value.length;
+      };
+      rec.onerror = (ev) => { if (ev.error !== "aborted") err.textContent = ev.error === "not-allowed" ? "마이크 사용이 차단되어 있습니다. 브라우저 권한을 확인해 주세요." : "음성 인식에 실패했습니다. 다시 시도해 주세요."; };
+      rec.onend = () => {
+        rec = null; mic.classList.remove("listening"); mic.textContent = "🎤 말하기";
+        if (src.value.trim() && !go.disabled && autoRun.checked) run();
+      };
+      err.textContent = "";
+      mic.classList.add("listening"); mic.textContent = "듣는 중… (탭하면 종료)";
+      try { rec.start(); } catch { rec = null; mic.classList.remove("listening"); mic.textContent = "🎤 말하기"; }
+    });
+  }
+
+  // Read a result aloud (speechSynthesis; voices depend on the device).
+  const VOICE_LANG = { zh: "zh-CN", en: "en-US", ja: "ja-JP" };
+  if ("speechSynthesis" in window) {
+    document.querySelectorAll(".speak").forEach((b) => {
+      b.hidden = false;
+      b.addEventListener("click", () => {
+        const card = b.closest(".card"), text = card.querySelector("p").textContent;
+        if (!text) return;
+        speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = VOICE_LANG[card.dataset.lang];
+        speechSynthesis.speak(u);
+      });
+    });
+  }
+
   function flash(b, label) { const old = b.textContent; b.textContent = label; setTimeout(() => (b.textContent = old), 1200); }
 
   function setAll(text, pending) {
