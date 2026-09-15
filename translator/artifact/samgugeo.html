@@ -174,29 +174,54 @@
     try { await navigator.share({ text }); } catch {}
   }));
   // Voice input (Android Chrome supports webkitSpeechRecognition).
+  // Android quirks handled here: stop() may never fire onend, onend may fire
+  // twice, and results can arrive after stop(). finish() is idempotent and a
+  // fallback timer forces abort() when stop() hangs.
   const mic = $("#mic");
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let rec = null;
+  const MIC_IDLE = "🎤 말하기", MIC_LIVE = "듣는 중… (탭하면 종료)";
+  let rec = null, stopTimer = null, gotFinal = false;
+  function finishListening() {
+    if (!rec) return;
+    const r = rec; rec = null;
+    clearTimeout(stopTimer); stopTimer = null;
+    r.onresult = r.onerror = r.onend = null;
+    try { r.abort(); } catch {}
+    mic.classList.remove("listening"); mic.textContent = MIC_IDLE;
+    if (src.value.trim() && !go.disabled && autoRun.checked) run();
+  }
+  function stopListening() {
+    if (!rec) return;
+    mic.textContent = "종료 중…";
+    try { rec.stop(); } catch { finishListening(); return; }
+    // If Android never reports the end, force it.
+    stopTimer = setTimeout(finishListening, 1200);
+  }
   if (SR) {
     mic.hidden = false;
     mic.addEventListener("click", () => {
-      if (rec) { rec.stop(); return; }
+      if (rec) { stopListening(); return; }
       rec = new SR();
-      rec.lang = "ko-KR"; rec.interimResults = true; rec.continuous = false;
+      rec.lang = "ko-KR"; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+      gotFinal = false;
       const base = src.value.trim() ? src.value.trim() + " " : "";
       rec.onresult = (ev) => {
         let t = "";
-        for (const r of ev.results) t += r[0].transcript;
+        for (const r of ev.results) { t += r[0].transcript; if (r.isFinal) gotFinal = true; }
         src.value = base + t; n.textContent = src.value.length;
+        // Non-continuous mode: once a final result is in, end promptly instead of
+        // waiting for the engine's own silence timeout.
+        if (gotFinal && !stopTimer) stopListening();
       };
-      rec.onerror = (ev) => { if (ev.error !== "aborted") err.textContent = ev.error === "not-allowed" ? "마이크 사용이 차단되어 있습니다. 브라우저 권한을 확인해 주세요." : "음성 인식에 실패했습니다. 다시 시도해 주세요."; };
-      rec.onend = () => {
-        rec = null; mic.classList.remove("listening"); mic.textContent = "🎤 말하기";
-        if (src.value.trim() && !go.disabled && autoRun.checked) run();
+      rec.onerror = (ev) => {
+        if (ev.error === "not-allowed" || ev.error === "service-not-allowed") err.textContent = "마이크 사용이 차단되어 있습니다. 브라우저 권한을 확인해 주세요.";
+        else if (ev.error !== "aborted" && ev.error !== "no-speech") err.textContent = "음성 인식에 실패했습니다. 다시 시도해 주세요.";
+        finishListening();
       };
+      rec.onend = finishListening;
       err.textContent = "";
-      mic.classList.add("listening"); mic.textContent = "듣는 중… (탭하면 종료)";
-      try { rec.start(); } catch { rec = null; mic.classList.remove("listening"); mic.textContent = "🎤 말하기"; }
+      mic.classList.add("listening"); mic.textContent = MIC_LIVE;
+      try { rec.start(); } catch { finishListening(); err.textContent = "마이크를 시작하지 못했습니다. 다시 시도해 주세요."; }
     });
   }
 
